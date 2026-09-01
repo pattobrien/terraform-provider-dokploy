@@ -1131,18 +1131,62 @@ func (r *ApplicationResource) updateGeneralSettings(appID string, plan *Applicat
 }
 
 func (r *ApplicationResource) saveBuildType(appID string, plan *ApplicationResourceModel) error {
-	return r.client.SaveBuildType(
-		appID,
-		plan.BuildType.ValueString(),
-		plan.DockerfilePath.ValueString(),
-		plan.DockerContextPath.ValueString(),
-		plan.DockerBuildStage.ValueString(),
-		plan.PublishDirectory.ValueString(),
-	)
+	// heroku_version and railpack_version are optional+computed: Dokploy
+	// defaults them when it creates the application and saveBuildType writes
+	// back whatever it receives, so sending an empty string strips the version
+	// and the next build runs `railpack-frontend:v`. Fall back to the versions
+	// Dokploy already holds when the practitioner has not pinned one.
+	herokuVersion := plan.HerokuVersion.ValueString()
+	railpackVersion := plan.RailpackVersion.ValueString()
+	if herokuVersion == "" || railpackVersion == "" {
+		app, err := r.client.GetApplication(appID)
+		if err != nil {
+			return fmt.Errorf("failed to read current build versions: %w", err)
+		}
+		if herokuVersion == "" {
+			herokuVersion = app.HerokuVersion
+		}
+		if railpackVersion == "" {
+			railpackVersion = app.RailpackVersion
+		}
+	}
+
+	return r.client.SaveBuildType(client.SaveBuildTypeInput{
+		ApplicationID:     appID,
+		BuildType:         plan.BuildType.ValueString(),
+		Dockerfile:        plan.DockerfilePath.ValueString(),
+		DockerContextPath: plan.DockerContextPath.ValueString(),
+		DockerBuildStage:  plan.DockerBuildStage.ValueString(),
+		PublishDirectory:  plan.PublishDirectory.ValueString(),
+		HerokuVersion:     herokuVersion,
+		RailpackVersion:   railpackVersion,
+	})
+}
+
+// watchPathsFromPlan converts the plan's watch_paths list for the git provider
+// endpoints. A null or unknown list stays nil so the payload omits watchPaths;
+// an empty list is sent as [] to clear the paths Dokploy holds.
+func watchPathsFromPlan(plan *ApplicationResourceModel) ([]string, error) {
+	if plan.WatchPaths.IsNull() || plan.WatchPaths.IsUnknown() {
+		return nil, nil
+	}
+	var paths []string
+	if diags := plan.WatchPaths.ElementsAs(context.Background(), &paths, false); diags.HasError() {
+		return nil, fmt.Errorf("invalid watch_paths: %s", diags.Errors()[0].Detail())
+	}
+	if paths == nil {
+		paths = []string{}
+	}
+	return paths, nil
 }
 
 func (r *ApplicationResource) saveSourceProvider(appID string, plan *ApplicationResourceModel) error {
 	sourceType := plan.SourceType.ValueString()
+
+	watchPaths, err := watchPathsFromPlan(plan)
+	if err != nil {
+		return err
+	}
 
 	switch sourceType {
 	case "github":
@@ -1170,6 +1214,7 @@ func (r *ApplicationResource) saveSourceProvider(appID string, plan *Application
 			Owner:            owner,
 			BuildPath:        buildPath,
 			GithubId:         plan.GithubId.ValueString(),
+			WatchPaths:       watchPaths,
 			EnableSubmodules: plan.EnableSubmodules.ValueBool(),
 			TriggerType:      plan.TriggerType.ValueString(),
 		}
@@ -1185,6 +1230,7 @@ func (r *ApplicationResource) saveSourceProvider(appID string, plan *Application
 			GitlabBranch:        plan.GitlabBranch.ValueString(),
 			GitlabBuildPath:     plan.GitlabBuildPath.ValueString(),
 			GitlabPathNamespace: plan.GitlabPathNamespace.ValueString(),
+			WatchPaths:          watchPaths,
 			EnableSubmodules:    plan.EnableSubmodules.ValueBool(),
 		}
 		return r.client.SaveGitlabProvider(input)
@@ -1197,6 +1243,7 @@ func (r *ApplicationResource) saveSourceProvider(appID string, plan *Application
 			BitbucketOwner:      plan.BitbucketOwner.ValueString(),
 			BitbucketBranch:     plan.BitbucketBranch.ValueString(),
 			BitbucketBuildPath:  plan.BitbucketBuildPath.ValueString(),
+			WatchPaths:          watchPaths,
 			EnableSubmodules:    plan.EnableSubmodules.ValueBool(),
 		}
 		return r.client.SaveBitbucketProvider(input)
@@ -1209,6 +1256,7 @@ func (r *ApplicationResource) saveSourceProvider(appID string, plan *Application
 			GiteaOwner:       plan.GiteaOwner.ValueString(),
 			GiteaBranch:      plan.GiteaBranch.ValueString(),
 			GiteaBuildPath:   plan.GiteaBuildPath.ValueString(),
+			WatchPaths:       watchPaths,
 			EnableSubmodules: plan.EnableSubmodules.ValueBool(),
 		}
 		return r.client.SaveGiteaProvider(input)
@@ -1220,6 +1268,7 @@ func (r *ApplicationResource) saveSourceProvider(appID string, plan *Application
 			CustomGitBranch:    plan.CustomGitBranch.ValueString(),
 			CustomGitBuildPath: plan.CustomGitBuildPath.ValueString(),
 			CustomGitSSHKeyId:  plan.CustomGitSSHKeyID.ValueString(),
+			WatchPaths:         watchPaths,
 			EnableSubmodules:   plan.EnableSubmodules.ValueBool(),
 		}
 		return r.client.SaveGitProvider(input)

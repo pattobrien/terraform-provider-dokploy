@@ -1156,22 +1156,34 @@ func (c *DokployClient) ListApplicationsByEnvironment(environmentID string) ([]A
 	return env.Applications, nil
 }
 
+// SaveBuildTypeInput contains all the fields for the saveBuildType endpoint.
+type SaveBuildTypeInput struct {
+	ApplicationID     string
+	BuildType         string
+	Dockerfile        string
+	DockerContextPath string
+	DockerBuildStage  string
+	PublishDirectory  string
+	HerokuVersion     string
+	RailpackVersion   string
+}
+
 // SaveBuildType configures the build type settings for an application.
 // Corresponds to application.saveBuildType endpoint.
-func (c *DokployClient) SaveBuildType(appID string, buildType string, dockerfile string, dockerContextPath string, dockerBuildStage string, publishDirectory string) error {
+func (c *DokployClient) SaveBuildType(input SaveBuildTypeInput) error {
 	// The API requires all these fields to be present as strings (even if
-	// empty). Recent Dokploy releases tightened the Zod schema so
-	// herokuVersion and railpackVersion are nonoptional; send them as empty
-	// strings (the UI's default for an app that hasn't pinned a version).
+	// empty) and writes them verbatim, so herokuVersion and railpackVersion
+	// have to carry the application's real versions: an empty railpackVersion
+	// builds with ghcr.io/railwayapp/railpack-frontend:v, which does not exist.
 	payload := map[string]interface{}{
-		"applicationId":     appID,
-		"buildType":         buildType,
-		"dockerfile":        dockerfile,
-		"dockerContextPath": dockerContextPath,
-		"dockerBuildStage":  dockerBuildStage,
-		"publishDirectory":  publishDirectory,
-		"herokuVersion":     "",
-		"railpackVersion":   "",
+		"applicationId":     input.ApplicationID,
+		"buildType":         input.BuildType,
+		"dockerfile":        input.Dockerfile,
+		"dockerContextPath": input.DockerContextPath,
+		"dockerBuildStage":  input.DockerBuildStage,
+		"publishDirectory":  input.PublishDirectory,
+		"herokuVersion":     input.HerokuVersion,
+		"railpackVersion":   input.RailpackVersion,
 	}
 
 	_, err := c.doRequest("POST", "application.saveBuildType", payload)
@@ -1211,7 +1223,8 @@ func (c *DokployClient) SaveGitProvider(input SaveGitProviderInput) error {
 	if input.EnableSubmodules {
 		payload["enableSubmodules"] = input.EnableSubmodules
 	}
-	if len(input.WatchPaths) > 0 {
+	// Send watchPaths if not nil (allows clearing by sending empty array)
+	if input.WatchPaths != nil {
 		payload["watchPaths"] = input.WatchPaths
 	}
 
@@ -1268,7 +1281,8 @@ func (c *DokployClient) SaveGithubProvider(input SaveGithubProviderInput) error 
 	} else {
 		payload["buildPath"] = "/"
 	}
-	if len(input.WatchPaths) > 0 {
+	// Send watchPaths if not nil (allows clearing by sending empty array)
+	if input.WatchPaths != nil {
 		payload["watchPaths"] = input.WatchPaths
 	}
 	if input.TriggerType != "" {
@@ -1325,7 +1339,8 @@ func (c *DokployClient) SaveGitlabProvider(input SaveGitlabProviderInput) error 
 	if input.GitlabPathNamespace != "" {
 		payload["gitlabPathNamespace"] = input.GitlabPathNamespace
 	}
-	if len(input.WatchPaths) > 0 {
+	// Send watchPaths if not nil (allows clearing by sending empty array)
+	if input.WatchPaths != nil {
 		payload["watchPaths"] = input.WatchPaths
 	}
 
@@ -1371,7 +1386,8 @@ func (c *DokployClient) SaveBitbucketProvider(input SaveBitbucketProviderInput) 
 	if input.BitbucketBuildPath != "" {
 		payload["bitbucketBuildPath"] = input.BitbucketBuildPath
 	}
-	if len(input.WatchPaths) > 0 {
+	// Send watchPaths if not nil (allows clearing by sending empty array)
+	if input.WatchPaths != nil {
 		payload["watchPaths"] = input.WatchPaths
 	}
 
@@ -1417,7 +1433,8 @@ func (c *DokployClient) SaveGiteaProvider(input SaveGiteaProviderInput) error {
 	if input.GiteaBuildPath != "" {
 		payload["giteaBuildPath"] = input.GiteaBuildPath
 	}
-	if len(input.WatchPaths) > 0 {
+	// Send watchPaths if not nil (allows clearing by sending empty array)
+	if input.WatchPaths != nil {
 		payload["watchPaths"] = input.WatchPaths
 	}
 
