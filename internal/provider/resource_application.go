@@ -821,14 +821,12 @@ func (r *ApplicationResource) Read(ctx context.Context, req resource.ReadRequest
 	readApplicationIntoState(&state, app)
 
 	// Read traefik config separately (not part of application response)
-	traefikConfig, err := r.client.ReadTraefikConfig(state.ID.ValueString())
+	traefikConfig, err := r.managedTraefikConfig(state.ID.ValueString(), state.TraefikConfig)
 	if err != nil {
 		// Don't fail the read if traefik config can't be fetched
 		resp.Diagnostics.AddWarning("Error reading Traefik config", err.Error())
-	} else if traefikConfig != "" {
-		state.TraefikConfig = types.StringValue(traefikConfig)
 	} else {
-		state.TraefikConfig = types.StringNull()
+		state.TraefikConfig = traefikConfig
 	}
 
 	diags = resp.State.Set(ctx, state)
@@ -886,17 +884,9 @@ func (r *ApplicationResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 
 	// 5. Update Traefik config if provided
-	if !plan.TraefikConfig.IsNull() && !plan.TraefikConfig.IsUnknown() {
-		if err := r.client.UpdateTraefikConfig(appID, plan.TraefikConfig.ValueString()); err != nil {
-			resp.Diagnostics.AddError("Error updating Traefik config", err.Error())
-			return
-		}
-	} else if !state.TraefikConfig.IsNull() && (plan.TraefikConfig.IsNull() || plan.TraefikConfig.ValueString() == "") {
-		// Clear traefik config if it was set before but is now empty/null
-		if err := r.client.UpdateTraefikConfig(appID, ""); err != nil {
-			resp.Diagnostics.AddError("Error clearing Traefik config", err.Error())
-			return
-		}
+	if err := r.syncTraefikConfig(appID, &plan); err != nil {
+		resp.Diagnostics.AddError("Error updating Traefik config", err.Error())
+		return
 	}
 
 	// 6. Read back the final state
@@ -910,13 +900,11 @@ func (r *ApplicationResource) Update(ctx context.Context, req resource.UpdateReq
 	updatePlanFromApplication(&plan, finalApp)
 
 	// Read traefik config separately (not part of application response)
-	traefikConfig, err := r.client.ReadTraefikConfig(appID)
+	traefikConfig, err := r.managedTraefikConfig(appID, plan.TraefikConfig)
 	if err != nil {
 		resp.Diagnostics.AddWarning("Error reading Traefik config", err.Error())
-	} else if traefikConfig != "" {
-		plan.TraefikConfig = types.StringValue(traefikConfig)
 	} else {
-		plan.TraefikConfig = types.StringNull()
+		plan.TraefikConfig = traefikConfig
 	}
 
 	diags = resp.State.Set(ctx, plan)
@@ -1166,6 +1154,34 @@ func (r *ApplicationResource) saveBuildType(appID string, plan *ApplicationResou
 // watchPathsFromPlan converts the plan's watch_paths list for the git provider
 // endpoints. A null or unknown list stays nil so the payload omits watchPaths;
 // an empty list is sent as [] to clear the paths Dokploy holds.
+// Dokploy generates the application's traefik file from its domains and
+// application.updateTraefikConfig overwrites that file verbatim, so an unset
+// traefik_config must never be "cleared" by writing "": that deletes every
+// router and the app stops being reachable.
+func (r *ApplicationResource) syncTraefikConfig(appID string, plan *ApplicationResourceModel) error {
+	if plan.TraefikConfig.IsNull() || plan.TraefikConfig.IsUnknown() {
+		return nil
+	}
+	return r.client.UpdateTraefikConfig(appID, plan.TraefikConfig.ValueString())
+}
+
+// The generated file only belongs in state while the configuration manages
+// traefik_config; otherwise it would show up as a value to clear on the next
+// update.
+func (r *ApplicationResource) managedTraefikConfig(appID string, prior types.String) (types.String, error) {
+	if prior.IsNull() || prior.IsUnknown() {
+		return types.StringNull(), nil
+	}
+	traefikConfig, err := r.client.ReadTraefikConfig(appID)
+	if err != nil {
+		return prior, err
+	}
+	if traefikConfig == "" {
+		return types.StringNull(), nil
+	}
+	return types.StringValue(traefikConfig), nil
+}
+
 func watchPathsFromPlan(plan *ApplicationResourceModel) ([]string, error) {
 	if plan.WatchPaths.IsNull() || plan.WatchPaths.IsUnknown() {
 		return nil, nil
