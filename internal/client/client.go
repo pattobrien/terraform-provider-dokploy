@@ -1025,7 +1025,7 @@ func (c *DokployClient) DeleteApplication(id string) error {
 	payload := map[string]string{
 		"applicationId": id,
 	}
-	_, err := c.doRequest("POST", "application.remove", payload)
+	_, err := c.doRequest("POST", "application.delete", payload)
 	return err
 }
 
@@ -2537,7 +2537,7 @@ func (c *DokployClient) DeleteDomain(id string) error {
 	payload := map[string]string{
 		"domainId": id,
 	}
-	_, err := c.doRequest("POST", "domain.remove", payload)
+	_, err := c.doRequest("POST", "domain.delete", payload)
 	return err
 }
 
